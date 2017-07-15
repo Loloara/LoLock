@@ -12,7 +12,6 @@ const int TriggerPin = 8; //Trig pin
 const int EchoPin = 9; //Echo pin
 long Duration = 0;
 int cnt = 0;
-int ccnt = 0;
 boolean doorVal = false;
 int led = 13;
 int angle = 0; // servo potision in degrees
