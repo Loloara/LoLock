@@ -3,7 +3,7 @@
 #include <Servo.h>
 
 LoRaShield LoRa1(10, 11);
-SoftwareSerial BTSerial(1,0); // (TX, RX)
+SoftwareSerial BTSerial(0,1); // (TX, RX)
 Servo servo;
 
 int pushButton = A5; // push Button pin
