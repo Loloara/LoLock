@@ -165,3 +165,17 @@ boolean recvMsg(unsigned int timeout){
   return true;
 }
 
+boolean initMember(void);                                   //멤버 초기화
+boolean addMember(char* recv_str);                          //멤버 추가
+boolean comparePreviousMemberForRegister(char* recv_str);   //멤보 등록
+
+boolean goOut(void);                                        //나갈 때
+boolean saveCurrentMember(void);                            //현재 연결된 멤버 저장
+boolean comparePreviousMemberForLog(void);                  //저장된 멤버에서 현재 연결된 멤버 비교
+
+boolean comeIn(void);                                       //들어올 때
+boolean comparePreviousMemberInOutList(char* recv_str);     //연결된 멤버 나간 리스트에서 찾기
+
+boolean openDoorByBLE(void);                                 //자동문
+boolean openDoorByLoRa(void);                                //원격 문 제어
+
