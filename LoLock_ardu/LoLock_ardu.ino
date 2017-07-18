@@ -17,7 +17,7 @@ byte data;
 
 String s,m;                    //LoRa ReadLine & GetMessage
 String member[6];              //member
-bool member_out[6] = false;    //going out state
+bool member_out[6];    //going out state
 int member_num=0;               //member number
 
 unsigned int loopCount = 0;
@@ -46,6 +46,8 @@ void loop() {
   while(Serial.available()){
     data = Serial.read();
     BTSerial.write(data);
+    if(data == 'm')
+      printMember();
   }
   
   if(recvMsg(1000)){
@@ -68,36 +70,36 @@ void loop() {
   while (LoRa.available())
   {
     s = LoRa.ReadLine(); 
-    Serial.print("LoRa.ReadLine() = ");
-    Serial.println(s);
+    //Serial.print("LoRa.ReadLine() = ");
+    //Serial.println(s);
     
-    m = LoRa.HexToString(LoRa.GetMessage());
+    m = LoRa.GetMessage();
     if(m != ""){
-      Serial.print("LoRa.GetMessage() = ");
+      Serial.print("Recv from LoRa : ");
       Serial.println(m);
-    }
-
-    switch(m.charAt(0)){
-      case '0':     //add member
-        if(member_num < 6)
-          addMember(m.substring(1));
-        else{
-          Serial.println("Member is full");
-          LoRa.SendMessage("MEMBER_FULL",HEX);
-        }
-      break;
-      case '1':   //open the door by LoRa
-        if(openDoorByLoRa()){
-          Serial.println("Open Success");
-          LoRa.SendMessage("Open Success",HEX);
-        }
-        else{
-          Serial.println("Open Fail");
-          LoRa.SendMessage("Open Fail",HEX);
-        }
-      break;
-      default:
-        Serial.println("Not Define Command");
+      
+      switch(m.charAt(0)){
+        case '0':     //add member
+          if(member_num < 6)
+            addMember(m.substring(1));
+          else{
+            Serial.println("Member is full");
+            LoRa.SendMessage("MEMBER_FULL",HEX);
+          }
+        break;
+        case '1':   //open the door by LoRa
+          if(openDoorByLoRa()){
+            Serial.println("Open Success");
+            LoRa.SendMessage("Open Success",HEX);
+          }
+          else{
+            Serial.println("Open Fail");
+            LoRa.SendMessage("Open Fail",HEX);
+          }
+        break;
+        default:
+          Serial.println("Not Define Command");
+      }
     }
   }
 
@@ -208,10 +210,15 @@ boolean recvMsg(unsigned int timeout){
 }
 
 void addMember(String recv_str){                          //멤버 추가
-  member[m.charAt(0)-(int)('0')] = m.substring(2);
-  if(m.charAt(1) != '0')
-    member_out[m.charAt(0)-(int)('0')] = true;
+  member[recv_str.charAt(0)-(int)('0')] = recv_str.substring(2);
+  if(recv_str.charAt(1) != '0')
+    member_out[recv_str.charAt(0)-(int)('0')] = true;
   member_num++;
+  
+  Serial.print("Member[");
+  Serial.print(recv_str.charAt(0));
+  Serial.print("] : ");
+  Serial.println(member[recv_str.charAt(0)-(int)('0')] + " : REGISTERED");
 }
 boolean comparePreviousMemberForRegister(char* recv_str);   //멤보 등록
 
@@ -223,4 +230,20 @@ boolean comeIn(void);                                       //들어올 때
 boolean comparePreviousMemberInOutList(char* recv_str);     //연결된 멤버 나간 리스트에서 찾기
 
 boolean openDoorByBLE(void);                                 //자동문
-boolean openDoorByLoRa(void);                                //원격 문 제어
+boolean openDoorByLoRa(void){                                //원격 문 제어
+  return false;
+}
+
+void printMember(void){   //print member with state
+  for(int i=0;i<member_num;i++){
+    Serial.print("Member[");
+    Serial.print(i);
+    Serial.print("] : ");
+    Serial.print(member[i]);
+    if(member_out[i])
+      Serial.println(" : OUT");
+    else
+      Serial.println(" : IN");
+  }
+}
+
