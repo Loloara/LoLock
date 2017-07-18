@@ -1,68 +1,106 @@
 #include <SoftwareSerial.h>
-//#include <LoRaShield.h>
+#include <LoRaShield.h>
 
+#define RxD 0        //BLE
+#define TxD 1        //BLE
+#define Tx 10        //LoRa
+#define Rx 11        //LoRa
+#define LED 13       //inner LED
+#define TriggerPin 8 //Ultrasonnic
+#define EchoPin 9    //Ultrasonnic
 
-//LoRaShield LoRa(10, 11);
-SoftwareSerial BTSerial(0,1); // (RX, TX)
+SoftwareSerial BTSerial(RxD,TxD); // (Rx, Tx)
+LoRaShield LoRa(Tx, Rx);  // (Tx, Rx)
 
 char recv_str[100];
 byte data;
 
+String s,m;                    //LoRa ReadLine & GetMessage
+String member[6];              //member
+bool member_out[6] = false;    //going out state
+int member_num=0;               //member number
+
 unsigned int loopCount = 0;
 unsigned int count = 0;
 
-const int TriggerPin = 8; //Trig pin
-const int EchoPin = 9; //Echo pin
 long Duration = 0;
 int cnt = 0;
 int ccnt = 0;
 boolean doorVal = false;
 
-int LED = 13;
-
 void setup() {
-//  pinMode(TriggerPin, OUTPUT); // Trigger is an output pin
-//  pinMode(EchoPin, INPUT); // Echo is an input pin
   Serial.begin(115200); // Serial Output
-  //LoRa.begin(38400);
-//  pinMode(11, OUTPUT);
   BTSerial.begin(115200);
+  LoRa.begin(38400);  
+  pinMode(Rx, OUTPUT);  //LoRa output pin
+//pinMode(TriggerPin, OUTPUT); // Trigger is an output pin
+//pinMode(EchoPin, INPUT); // Echo is an input pin
   
   pinMode(LED, OUTPUT);  
   digitalWrite(LED, LOW);
+  
+  LoRa.SendMessage("Initializing from server",HEX); //first send message to server after booting
 }
 
 void loop() {
-
-  if(Serial.available()){
-    BTSerial.write(Serial.read());
+  while(Serial.available()){
+    data = Serial.read();
+    BTSerial.write(data);
   }
   
   if(recvMsg(1000)){
-      Serial.print("recv: ");
-      Serial.print((char*)recv_str);
-      Serial.println("");
+      Serial.write("recv: ");
+      Serial.write((char*)recv_str);
+      Serial.write('\n');
+      switch(recv_str[0]){
+        case '0': //first connected message
+          BTSerial.write("LoLock Connected\n");
+          Serial.write("LoLock Connected\n");
+        break;
+        case '1': //door open
+          BTSerial.write("Open the door\n");
+          Serial.write("Open the door\n");
+        break;
+      }
     }
   
-/*
+
   while (LoRa.available())
   {
-    String s = LoRa.ReadLine(); 
+    s = LoRa.ReadLine(); 
     Serial.print("LoRa.ReadLine() = ");
     Serial.println(s);
     
-     String m = LoRa.GetMessage();    
+    m = LoRa.HexToString(LoRa.GetMessage());
     if(m != ""){
       Serial.print("LoRa.GetMessage() = ");
       Serial.println(m);
     }
 
-    if(m == "280101")
-      digitalWrite(led, HIGH);
-    else if(m == "280100")
-      digitalWrite(led, LOW);
+    switch(m.charAt(0)){
+      case '0':     //add member
+        if(member_num < 6)
+          addMember(m.substring(1));
+        else{
+          Serial.println("Member is full");
+          LoRa.SendMessage("MEMBER_FULL",HEX);
+        }
+      break;
+      case '1':   //open the door by LoRa
+        if(openDoorByLoRa()){
+          Serial.println("Open Success");
+          LoRa.SendMessage("Open Success",HEX);
+        }
+        else{
+          Serial.println("Open Fail");
+          LoRa.SendMessage("Open Fail",HEX);
+        }
+      break;
+      default:
+        Serial.println("Not Define Command");
+    }
   }
-*/
+
 
   /*
   digitalWrite(TriggerPin, LOW);
@@ -141,6 +179,9 @@ long Distance(long time)
   return DistanceCalc; // return calculated value
 }
 */
+
+void setupBlueToothConnection();
+
 boolean recvMsg(unsigned int timeout){
   //wait for feedback
   unsigned int time = 0;
@@ -152,7 +193,8 @@ boolean recvMsg(unsigned int timeout){
     if(BTSerial.available()){
       recv_str[i++] = char(BTSerial.read());
       break;
-    }
+    }else
+      return false;
     time++;
     if(time > (timeout/50)) return false;
   }
@@ -161,12 +203,16 @@ boolean recvMsg(unsigned int timeout){
     recv_str[i++] = char(BTSerial.read());
   }
   recv_str[i] = '\0';
-  BTSerial.print("Received Complete");
+  BTSerial.write("Received Complete");
   return true;
 }
 
-boolean initMember(void);                                   //멤버 초기화
-boolean addMember(char* recv_str);                          //멤버 추가
+void addMember(String recv_str){                          //멤버 추가
+  member[m.charAt(0)-(int)('0')] = m.substring(2);
+  if(m.charAt(1) != '0')
+    member_out[m.charAt(0)-(int)('0')] = true;
+  member_num++;
+}
 boolean comparePreviousMemberForRegister(char* recv_str);   //멤보 등록
 
 boolean goOut(void);                                        //나갈 때
@@ -178,4 +224,3 @@ boolean comparePreviousMemberInOutList(char* recv_str);     //연결된 멤버 �
 
 boolean openDoorByBLE(void);                                 //자동문
 boolean openDoorByLoRa(void);                                //원격 문 제어
-
