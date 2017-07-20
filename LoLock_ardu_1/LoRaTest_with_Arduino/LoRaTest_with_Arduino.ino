@@ -1,3 +1,7 @@
+/*
+    푸쉬버튼 아날로그입력 -> 디지털입력으로 변경
+    (INPUT상태가 더 안정화됨)
+*/
 #include <LoRaShield.h>
 #include <Servo.h>
 #include <SoftwareSerial.h>
@@ -7,11 +11,12 @@ SoftwareSerial BTSerial(0,1); //(RX, TX)
 Servo servo;
 
 int led = 13;
-int pushButton = A5;  // Pushbutton Pin
+int pushButton = 12;  // Pushbutton Pin
 int servoPin = 5; // servo Motor Pin
 int TriggerPin = 8; // Trig Pin
 int EchoPin = 9; // Echo Pin
 long Duration = 0;
+boolean pushCnt = false; // 서보모터가 돌아가 있는지 여부
 int cnt = 0;
 boolean doorVal = false;
 int angle = 0; // servo potision in degrees
@@ -20,17 +25,59 @@ void setup() {
   BTSerial.begin(9600);
   Serial.begin(115200);
   LoRa1.begin(38400);
+  pinMode(pushButton, INPUT);
   pinMode(led, OUTPUT);
   servo.attach(servoPin);
   servo.write(0);
 }
 
 void loop() {
-  int i = analogRead(5);  // A5 아날로그 입력으로 전압을 읽어들임
-  if(i > 1000)   //전압값이 1000보다 크면 (약 4.88V)
+
+  PushButton();
+  DoorOpenState();
+  
+  while (LoRa1.available())
+    {
+      String s = LoRa1.ReadLine();
+      Serial.print("LoRa.ReadLine() = ");
+      Serial.println(s);
+ 
+      String m = LoRa1.GetMessage();
+      Serial.print("LoRa.GetMessage() = ");
+      Serial.println(m);
+
+      if(m == "260010") {
+        digitalWrite(led, HIGH);
+        servo.write(60);
+        delay(100);
+        servo.write(0);
+      }
+      else if(m == "260011")
+        digitalWrite(led, LOW);
+    }
+}
+
+void PushButton()
+{
+  int i = digitalRead(pushButton);  // A5 아날로그 입력으로 전압을 읽어들임
+  delay(100);
+  if(!i){     // i 상태 == 1
     servo.write(60);  //모터 60도 회전
-  else if(i < 1000) 
+    pushCnt = true;
+  }
+  else {
     servo.write(0);
+    if(pushCnt)
+    {
+      LoRa1.SendMessage("Click", HEX);
+      Serial.println("Click!");
+      pushCnt = false;
+    }
+  }
+}
+
+void DoorOpenState()
+{
   digitalWrite(TriggerPin, LOW);
   delayMicroseconds(2);
   digitalWrite(TriggerPin, HIGH); // Trigger pin to HIGH
@@ -63,28 +110,7 @@ void loop() {
     cnt = 0; */
   
   
-  
-  while (LoRa1.available())
-    {
-      String s = LoRa1.ReadLine();
-      Serial.print("LoRa.ReadLine() = ");
-      Serial.println(s);
- 
-      String m = LoRa1.GetMessage();
-      Serial.print("LoRa.GetMessage() = ");
-      Serial.println(m);
-
-      if(m == "260010") {
-        digitalWrite(led, HIGH);
-        servo.write(60);
-        delay(100);
-        servo.write(0);
-      }
-      else if(m == "260011")
-        digitalWrite(led, LOW);
-    }
 }
-
 long Distance(long time)
 {
   // Calculates the Distance in mm
