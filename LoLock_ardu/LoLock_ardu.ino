@@ -1,110 +1,61 @@
 #include <SoftwareSerial.h>
 #include <LoRaShield.h>
+#include <Servo.h>
 
-#define RxD 0        //BLE
-#define TxD 1        //BLE
-#define Tx 10        //LoRa
-#define Rx 11        //LoRa
-#define LED 13       //inner LED
-#define TriggerPin 8 //Ultrasonnic
-#define EchoPin 9    //Ultrasonnic
+LoRaShield LoRa1(10, 11);
+SoftwareSerial BTSerial(0,1); // (TX, RX)
+Servo servo;
 
-SoftwareSerial BTSerial(RxD,TxD); // (Rx, Tx)
-LoRaShield LoRa(Tx, Rx);  // (Tx, Rx)
-
-char recv_str[100];
-byte data;
-
-String s,m;                    //LoRa ReadLine & GetMessage
-String member[6];              //member
-bool member_out[6];    //going out state
-int member_num=0;               //member number
-
-unsigned int loopCount = 0;
-unsigned int count = 0;
-
+int pushButton = A5; // push Button pin
+const int servoPin = 5; // 서보모터 pin
+const int TriggerPin = 8; //Trig pin
+const int EchoPin = 9; //Echo pin
 long Duration = 0;
 int cnt = 0;
-int ccnt = 0;
 boolean doorVal = false;
+int led = 13;
+int angle = 0; // servo potision in degrees
 
 void setup() {
-  Serial.begin(115200); // Serial Output
-  BTSerial.begin(115200);
-  LoRa.begin(38400);  
-  pinMode(Rx, OUTPUT);  //LoRa output pin
-//pinMode(TriggerPin, OUTPUT); // Trigger is an output pin
-//pinMode(EchoPin, INPUT); // Echo is an input pin
-  
-  pinMode(LED, OUTPUT);  
-  digitalWrite(LED, LOW);
-  
-  LoRa.SendMessage("Initializing from server",HEX); //first send message to server after booting
+  pinMode(TriggerPin, OUTPUT); // Trigger is an output pin
+  pinMode(EchoPin, INPUT); // Echo is an input pin
+  Serial.begin(9600); // Serial Output
+  BTSerial.begin(9600); // Bluetooth Output
+  LoRa1.begin(38400);
+  pinMode(led, OUTPUT);
+  servo.attach(servoPin);
+  servo.write(0);
 }
 
 void loop() {
-  while(Serial.available()){
-    data = Serial.read();
-    BTSerial.write(data);
-    if(data == 'm')
-      printMember();
-  }
-  
-  if(recvMsg(1000)){
-      Serial.write("recv: ");
-      Serial.write((char*)recv_str);
-      Serial.write('\n');
-      switch(recv_str[0]){
-        case '0': //first connected message
-          BTSerial.write("LoLock Connected\n");
-          Serial.write("LoLock Connected\n");
-        break;
-        case '1': //door open
-          BTSerial.write("Open the door\n");
-          Serial.write("Open the door\n");
-        break;
-      }
-    }
-  
 
-  while (LoRa.available())
+  int i = analogRead(5); // A5 아날로그 입력으로부터 전압을 읽어옴
+  if(i > 1000) {  //전압값이 1000보다 크면 (약 4.88V)
+    servo.write(60);  //모터 60도 회전
+    digitalWrite(led, HIGH); // 내장 LED ON
+  }
+  else if(i < 1000) {
+    servo.write(0);
+    digitalWrite(led, LOW);
+  }
+  while (LoRa1.available())
   {
-    s = LoRa.ReadLine(); 
-    //Serial.print("LoRa.ReadLine() = ");
-    //Serial.println(s);
-    
-    m = LoRa.GetMessage();
-    if(m != ""){
-      Serial.print("Recv from LoRa : ");
-      Serial.println(m);
-      
-      switch(m.charAt(0)){
-        case '0':     //add member
-          if(member_num < 6)
-            addMember(m.substring(1));
-          else{
-            Serial.println("Member is full");
-            LoRa.SendMessage("MEMBER_FULL",HEX);
-          }
-        break;
-        case '1':   //open the door by LoRa
-          if(openDoorByLoRa()){
-            Serial.println("Open Success");
-            LoRa.SendMessage("Open Success",HEX);
-          }
-          else{
-            Serial.println("Open Fail");
-            LoRa.SendMessage("Open Fail",HEX);
-          }
-        break;
-        default:
-          Serial.println("Not Define Command");
-      }
-    }
+    String s = LoRa1.ReadLine();
+    Serial.print("LoRa.ReadLine() = ");
+    Serial.println(s);
+ 
+    String m = LoRa1.GetMessage();
+    Serial.print("LoRa.GetMessage() = ");
+    Serial.println(m);
+
+    if(m == "260100")
+      digitalWrite(led, HIGH);
+    else if(m == "260101")
+      digitalWrite(led, LOW);
   }
 
 
-  /*
+  
   digitalWrite(TriggerPin, LOW);
   delayMicroseconds(2);
   digitalWrite(TriggerPin, HIGH); // Trigger pin to HIGH
@@ -139,8 +90,6 @@ void loop() {
   {
     cnt = 0;
   }
-  */
-  
   /*if(doorVal)
     BTSerial.begin(9600);
   else
@@ -152,24 +101,10 @@ void loop() {
     Serial.println("Door Open!");
   else
     Serial.println("Door Closed");
-
-
-    if(loopCount == 0){
-      LoRa.SendMessage("Hello LoRa",HEX);
-      LoRa.PrintTTV("12", count);
-      LoRa.SendTTV();
-    }
-  
+  */
   delay(100); // Wait to do next measurement
-  loopCount++;
-  count++;
-  if(loopCount == 100)
-    loopCount=0;
-  if(count == 999999)
-    count=0;
-    */
 }
-/*
+
 long Distance(long time)
 {
   // Calculates the Distance in mm
@@ -180,70 +115,3 @@ long Distance(long time)
   //DistanceCalc = time / 74 / 2; // Actual calculation in inches
   return DistanceCalc; // return calculated value
 }
-*/
-
-void setupBlueToothConnection();
-
-boolean recvMsg(unsigned int timeout){
-  //wait for feedback
-  unsigned int time = 0;
-  unsigned int i = 0;
-  
-  //waiting for the first character with time out
-  while(true){
-    delay(50);
-    if(BTSerial.available()){
-      recv_str[i++] = char(BTSerial.read());
-      break;
-    }else
-      return false;
-    time++;
-    if(time > (timeout/50)) return false;
-  }
-
-  while(BTSerial.available() && (i < 1024)){
-    recv_str[i++] = char(BTSerial.read());
-  }
-  recv_str[i] = '\0';
-  BTSerial.write("Received Complete");
-  return true;
-}
-
-void addMember(String recv_str){                          //멤버 추가
-  member[recv_str.charAt(0)-(int)('0')] = recv_str.substring(2);
-  if(recv_str.charAt(1) != '0')
-    member_out[recv_str.charAt(0)-(int)('0')] = true;
-  member_num++;
-  
-  Serial.print("Member[");
-  Serial.print(recv_str.charAt(0));
-  Serial.print("] : ");
-  Serial.println(member[recv_str.charAt(0)-(int)('0')] + " : REGISTERED");
-}
-boolean comparePreviousMemberForRegister(char* recv_str);   //멤보 등록
-
-boolean goOut(void);                                        //나갈 때
-boolean saveCurrentMember(void);                            //현재 연결된 멤버 저장
-boolean comparePreviousMemberForLog(void);                  //저장된 멤버에서 현재 연결된 멤버 비교
-
-boolean comeIn(void);                                       //들어올 때
-boolean comparePreviousMemberInOutList(char* recv_str);     //연결된 멤버 나간 리스트에서 찾기
-
-boolean openDoorByBLE(void);                                 //자동문
-boolean openDoorByLoRa(void){                                //원격 문 제어
-  return false;
-}
-
-void printMember(void){   //print member with state
-  for(int i=0;i<member_num;i++){
-    Serial.print("Member[");
-    Serial.print(i);
-    Serial.print("] : ");
-    Serial.print(member[i]);
-    if(member_out[i])
-      Serial.println(" : OUT");
-    else
-      Serial.println(" : IN");
-  }
-}
-
