@@ -1,9 +1,7 @@
 #include <LoRaShield.h>
+#include <CurieBLE.h>
 #include <Servo.h>
-#include <SoftwareSerial.h>
 
-#define BlueTxD 2           //Bluetooth TX
-#define BlueRxD 3           //Bluetooth RX
 #define SERVOPIN 5          //servo Motor Pin
 #define TriggerPin 8        //Trig Pin
 #define EchoPin 9           //Echo Pin
@@ -13,67 +11,116 @@
 #define OPEN 60          //angle of door open
 #define CLOSE 0          //angle of door close
 
-LoRaShield LoRa(Tx, Rx);
-SoftwareSerial BTSerial(BlueTxD, BlueRxD); //(RX, TX)
-Servo servo;
+//BLE 서비스 설정을 위한 선언구간
+BLEService service = BLEService("FEAA"); //UUID -> 0xFEAA로 뜸.
+BLECharacteristic characteristic( "FEAA", BLEBroadcast, 50 );
+//uint8 설정이 많은 이유-> HEX값으로 URL지정함.
+const uint8_t FRAME_TYPE_EDDYSTONE_UID = 0x00;
+const uint8_t FRAME_TYPE_EDDYSTONE_URL = 0x10;
+const uint8_t FRAME_TYPE_EDDYSTONE_TLM = 0x20;
+const uint8_t FRAME_TYPE_EDDYSTONE_EID = 0x40;
+const uint8_t URL_PREFIX_HTTP_WWW_DOT = 0x00;
+const uint8_t URL_PREFIX_HTTPS_WWW_DOT = 0x01;
+const uint8_t URL_PREFIX_HTTP_COLON_SLASH_SLASH = 0x02;
+const uint8_t URL_PREFIX_HTTPS_COLON_SLASH_SLASH = 0x03;
+const uint8_t URL_EXPANSION_COM = 0x07;
 
-String s,m;              //LoRa.ReadLine(), GetMessage()
-byte data;
+const int8_t TX_POWER_DBM = -29; // (-70 + 41);Tx 송출시 기기와 측정장비 사이의 거리가 0m일 때 -29dBm
+
+//로라 쉴드, 서보모터,초음파센서 선언부
+LoRaShield LoRa(Tx, Rx);
+String s,m;
+Servo servo;
 long duration_val = 0;
 boolean push_cnt = false;  //서보모터가 돌아가 있는지 여부
 int cnt = 0;               //초음파 센서 알고리즘
 boolean door_val = false; //문의 상태 TRUE:OPEN FALSE:CLOSE
 boolean asButton = false; //버튼을 통해 문이 열렸는지 확인하는 변수
 
-void setup() {
-  BTSerial.begin(9600);
-  Serial.begin(9600);
+
+void setup() 
+{
+  //로라 설정
   LoRa.begin(38400);
+  Serial.begin(9600);
+  // enable if you want to log values to Serial Monitor
+  // Serial.begin(9600);
+
+
+
+  //BLE 설정, 실행
+  // begin initialization
+  BLE.begin();
+
+  // No not set local name 
+  //만약 local name을 지정해주면 비콘이 탐지 되지 않음, 설정이 부족해서 안 뜨는 것 같기도 함.
+  //BLE.setLocalName("LOLO-LOCK");
+
+  // set service
+  BLE.setAdvertisedService(service);
+  
+  // add the characteristic to the service
+  service.addCharacteristic( characteristic );
+
+  // add service
+  BLE.addService( service );
+
+  // call broadcast otherwise Service Data is not included in advertisement value
+  characteristic.broadcast();
+
+  // characteristic.writeValue *after* calling characteristic.broadcast
+  uint8_t advdatacopy[] =
+  {   
+    FRAME_TYPE_EDDYSTONE_URL,
+    (uint8_t) TX_POWER_DBM, // Tx Power. Cast to uint8_t or you get a "warning: narrowing conversion"
+    // I suppose it's doing 2s Complement conversion to convert from a negative integer to a hex value.  
+    URL_PREFIX_HTTP_WWW_DOT, // http://www.
+    0x67,0x6f,0x6f,0x67,0x6c,0x65, // google //여기 고치면 URL 바꾸기 가능. 각각의 알파벳마다 ASCII HEX값 지정만 알아내서 넣으면 가능.
+    URL_EXPANSION_COM // .com
+  };
+  characteristic.writeValue( advdatacopy, sizeof(advdatacopy) );
+
+  // start advertising
+  BLE.advertise();  
+
+  //서보
   pinMode(PUSH, INPUT);
   servo.attach(SERVOPIN);
   servo.write(CLOSE);
 }
-
-void loop() {
-
+ 
+void loop() 
+{  
+  //푸시버튼, 문 열림상태 감지 함수.
   pushButton();
   DoorOpenState();
-  
-  if (BTSerial.available()){ 
-    data = BTSerial.read();
-    Serial.write(data);
-  }  
-  if (Serial.available()){
-    data = Serial.read();
-    BTSerial.write(data);
-  }
-  
-  while (LoRa.available())
-  {
+  //로라 실행구간.
+   while (LoRa.available())
+   {
     s = LoRa.ReadLine();
-    //Serial.print("LoRa.ReadLine() = ");
-    //Serial.println(s);
+    Serial.print("LoRa.ReadLine() = ");
+    Serial.println(s);
 
     m = LoRa.GetMessage();
     if(m != ""){
-    Serial.println("Recv from LoRa : " + m);
-      if(m == "22"){    //command that open the door by LoRa
-        openDoorByLoRa();
-      }
-    }
-  }
+      Serial.println("Recv from LoRa : " + m);
+     }
+   }
 }
+
 
 void pushButton()
 {
   int i = digitalRead(PUSH);  // A5 아날로그 입력으로 전압을 읽어들임
-  
-  if(!i){     // i 상태 == 1
+
+  if(!i)// i 상태 == 1
+  {     
     servo.write(OPEN);  //모터 60도 회전
     asButton = true;
     push_cnt = true;
   }
-  else {
+  else 
+  {
     servo.write(CLOSE);
     if(push_cnt)
     {
@@ -92,6 +139,7 @@ void DoorOpenState()
   delayMicroseconds(10); // 10us high
   digitalWrite(TriggerPin, LOW); // Trigger pin to HIGH
  
+  //진원이형이 해결한구간?
   //duration_val = pulseIn(EchoPin, HIGH); // Waits for the echo pin to get high
   //returns the Duration in microseconds
 
@@ -104,8 +152,7 @@ void DoorOpenState()
   }
   else
   {
-    cnt--;
-    
+    cnt--;    
   }
   if(cnt > 10)
   {  
@@ -124,21 +171,22 @@ void DoorOpenState()
    }
   if (cnt < 0)
     cnt = 0; */
-  
-  
 }
+
+//초음파 센서 거리 계산 공식
 long Distance(long _time)
 {
   // Calculates the Distance in mm
   // ((time)*(Speed of sound))/ toward and backward of object) * 10
-
   long DistanceCalc; // Calculation variable
   DistanceCalc = ((_time / 2.9) / 2); // Actual calculation in mm
   //DistanceCalc = time / 74 / 2; // Actual calculation in inches
   return DistanceCalc; // return calculated value
 }
 
-void openDoorByLoRa(void){
+
+boolean openDoorByLoRa(void)
+{
   //if(Closed){
   servo.write(OPEN);
   
@@ -146,6 +194,7 @@ void openDoorByLoRa(void){
   Serial.println("Open Success");
   LoRa.SendMessage("Open Success",HEX);
   return true;
+
   //}
   //if(Opened){
   //Serial.println("Open Fail");
