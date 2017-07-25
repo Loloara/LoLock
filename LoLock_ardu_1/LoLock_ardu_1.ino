@@ -2,14 +2,15 @@
 #include <CurieBLE.h>
 #include <Servo.h>
 
-#define SERVOPIN 5          //servo Motor Pin
-#define TriggerPin 8        //Trig Pin
-#define EchoPin 9           //Echo Pin
+#define SERVOPIN 4          //servo Motor Pin
+#define TriggerPin 5        //Trig Pin
+#define EchoPin 6           //Echo Pin
 #define Tx 10               //LoRa
 #define Rx 11               //LoRa
 #define PUSH 12             //pushButton Pin
 #define OPEN 60          //angle of door open
 #define CLOSE 0          //angle of door close
+#define PIEZO A1         //piezo vibration sensor Pin
 
 //BLE 서비스 설정을 위한 선언구간
 BLEService service = BLEService("FEAA"); //UUID -> 0xFEAA로 뜸.
@@ -31,7 +32,8 @@ const int8_t TX_POWER_DBM = -29; // (-70 + 41);Tx 송출시 기기와 측정장�
 LoRaShield LoRa(Tx, Rx);
 String s,m;
 Servo servo;
-long duration_val = 0;
+long duration_val = 0;     //초음파 송신~수신 간 감지시간
+long distance = 0;         //초음파로 감지된 거리
 boolean push_cnt = false;  //서보모터가 돌아가 있는지 여부
 int cnt = 0;               //초음파 센서 알고리즘
 boolean door_val = false; //문의 상태 TRUE:OPEN FALSE:CLOSE
@@ -42,9 +44,8 @@ void setup()
 {
   //로라 설정
   LoRa.begin(38400);
-  Serial.begin(9600);
+  Serial.begin(115200); //보드레이트 이격
   // enable if you want to log values to Serial Monitor
-  // Serial.begin(9600);
 
 
 
@@ -85,6 +86,7 @@ void setup()
 
   //서보
   pinMode(PUSH, INPUT);
+  pinMode(Tx, OUTPUT);
   servo.attach(SERVOPIN);
   servo.write(CLOSE);
 }
@@ -105,15 +107,24 @@ void loop()
     if(m != ""){
       Serial.println("Recv from LoRa : " + m);
      }
+     //LoRa 수신확인용 코드/////
+     if(m == "26")
+     {
+      servo.write(OPEN);
+      Serial.println("CHECK");
+      delay(100);
+      servo.write(CLOSE);
+     }
+     /////////////////////////
    }
 }
 
 
 void pushButton()
 {
-  int i = digitalRead(PUSH);  // A5 아날로그 입력으로 전압을 읽어들임
+  int i = digitalRead(PUSH);  // 8번 디지털 입력으로 전압을 읽어들임
 
-  if(!i)// i 상태 == 1
+  if(!i)                // i 상태 == 1
   {     
     servo.write(OPEN);  //모터 60도 회전
     asButton = true;
@@ -123,9 +134,9 @@ void pushButton()
   {
     servo.write(CLOSE);
     if(push_cnt)
-    {
-      LoRa.SendMessage("Going Out", HEX);
+    {     
       Serial.println("Button Clicked");
+      LoRa.SendMessage("26", HEX);
       push_cnt = false;
     }
   }
@@ -133,18 +144,19 @@ void pushButton()
 
 void DoorOpenState()
 {
-  digitalWrite(TriggerPin, LOW);
-  delayMicroseconds(2);
+  /*digitalWrite(TriggerPin, LOW);
+  delayMicroseconds(2);*/
   digitalWrite(TriggerPin, HIGH); // Trigger pin to HIGH
   delayMicroseconds(10); // 10us high
   digitalWrite(TriggerPin, LOW); // Trigger pin to HIGH
  
   //진원이형이 해결한구간?
-  //duration_val = pulseIn(EchoPin, HIGH); // Waits for the echo pin to get high
-  //returns the Duration in microseconds
-
-  long Distance_mm = Distance(duration_val); // Use function to calculate the distance
   
+  duration_val = NizPulseIn(EchoPin, HIGH, 37)/5.82;
+  //진원이의 펄스인 함수
+  distance = ((float)(340*duration_val)/10000)/2; // Use function to calculate the distance
+  //Serial.print("Duration : ");
+  //Serial.println(duration_val);
   /*if(Distance_mm > 500 && Distance_mm < 30000) 
   {
     cnt++;
@@ -173,17 +185,31 @@ void DoorOpenState()
     cnt = 0; */
 }
 
-//초음파 센서 거리 계산 공식
-long Distance(long _time)
-{
-  // Calculates the Distance in mm
-  // ((time)*(Speed of sound))/ toward and backward of object) * 10
-  long DistanceCalc; // Calculation variable
-  DistanceCalc = ((_time / 2.9) / 2); // Actual calculation in mm
-  //DistanceCalc = time / 74 / 2; // Actual calculation in inches
-  return DistanceCalc; // return calculated value
-}
 
+unsigned long NizPulseIn(int pin, int value, int timeout) { // the following comments assume that we're passing HIGH as value. timeout is in milliseconds
+    unsigned long now = micros();
+    while(digitalRead(pin) == value) { // wait if pin is already HIGH when the function is called, but timeout if it never goes LOW
+        if (micros() - now > (timeout*500)) {
+            return 0;
+        }
+    }
+    //t_1 = micros()/100;
+    now = micros(); // could delete this line if you want only one timeout period from the start until the actual pulse width timing starts
+    while (digitalRead(pin) != value) { // pin is LOW, wait for it to go HIGH befor we start timing, but timeout if it never goes HIGH within the timeout period
+        if (micros() - now > (timeout*500)) { 
+            return 0;
+        }
+    }
+    //t_2 = micros()/100;
+    now = micros();
+    while (digitalRead(pin) == value) { // start timing the HIGH pulse width, but time out if over timeout milliseconds
+        if (micros() - now > (timeout*500)) {
+            return 0;
+        }
+    }
+    //t_3 = micros()/100;
+    return micros() - now;
+}
 
 boolean openDoorByLoRa(void)
 {
