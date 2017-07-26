@@ -86,7 +86,7 @@ void setup()
 
   //서보
   pinMode(PUSH, INPUT);
-  pinMode(Tx, OUTPUT);
+  pinMode(Rx, OUTPUT);
   servo.attach(SERVOPIN);
   servo.write(CLOSE);
 }
@@ -122,7 +122,7 @@ void loop()
 
 void pushButton()
 {
-  int i = digitalRead(PUSH);  // 8번 디지털 입력으로 전압을 읽어들임
+  int i = digitalRead(PUSH);  // 12번 디지털 입력으로 전압을 읽어들임
 
   if(!i)                // i 상태 == 1
   {     
