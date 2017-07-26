@@ -7,7 +7,7 @@
 #define Tx 10               //LoRa
 #define Rx 11               //LoRa
 #define PUSH 12             //pushButton Pin
-#define OPEN 60          //angle of door open
+#define OPEN 90          //angle of door open
 #define CLOSE 0          //angle of door close
 #define PIEZO A1         //piezo vibration sensor Pin
 
@@ -88,14 +88,16 @@ void setup()
   // start advertising
   BLE.advertise();  
 
-  //서보
   pinMode(PUSH, INPUT);
   pinMode(Rx, OUTPUT);
+  
+  //서보  
   servo.attach(SERVOPIN);
   servo.write(CLOSE);
 
   CurieIMU.begin();
   CurieIMU.setAccelerometerRange(2);  
+  Serial.println("Run Success");
 }
  
 void loop() 
@@ -129,40 +131,32 @@ void loop()
 void pushButton()
 {
   int i = digitalRead(PUSH);  // 12번 디지털 입력으로 전압을 읽어들임
+  Serial.println(i);
 
-  if(!i)                // i 상태 == 1
+  if(!i && !push_cnt)                // i 상태 == 1
   {     
-    servo.write(OPEN);  //모터 60도 회전
+    servo.write(OPEN);  //모터 90도 회전
     asButton = true;
     push_cnt = true;
   }
   else 
   {
-    servo.write(CLOSE);
     if(push_cnt)
     {     
-      Serial.println("Button Clicked");
-      LoRa.SendMessage("Button Clicked", HEX);
+      delay(100);
+      servo.write(CLOSE);
+      Serial.println("button pushed");
       push_cnt = false;
     }
   }
 }
 
-boolean openDoorByLoRa(void)
+void openDoorByLoRa(void)
 {
-  //if(Closed){
   servo.write(OPEN);
   delay(100);  
   servo.write(CLOSE);
   Serial.println("Open Success");
-  LoRa.SendMessage("Open Success",HEX);
-  return true;
-
-  //}
-  //if(Opened){
-  //Serial.println("Open Fail");
-  //LoRa.SendMessage("Open Fail",HEX);
-  // return false;}
 }
 
 void doorCheckByAccel(void){
@@ -186,12 +180,11 @@ void doorCheckByAccel(void){
   if(diffCount > 10 && !isMoving){
     movingCount++;
     isMoving = true;
-    Serial.println("Door State: Open");
     if(asButton){
       Serial.println("Door is open inside");
-      LoRa.SendMessage("Door is open inside",HEX);
+      LoRa.SendMessage("Door is opened inside",HEX);
     }else{
-      Serial.println("Door is open outside");
+      Serial.println("Door is opened outside");
       LoRa.SendMessage("Door is open outside",HEX);
     }
     asButton = false;
@@ -204,10 +197,10 @@ void doorCheckByAccel(void){
     isMoving = false;
     diffCount = 0;
   }
-  Serial.print("gForce: ");
-  Serial.print(gForce);
-  Serial.print("          movingCount: ");
-  Serial.print(movingCount);
-  Serial.print("          cnt_initial: ");
-  Serial.println(cnt_initial);
+//  Serial.print("gForce: ");
+//  Serial.print(gForce);
+//  Serial.print("          movingCount: ");
+//  Serial.print(movingCount);
+//  Serial.print("          cnt_initial: ");
+//  Serial.println(cnt_initial);
 }
