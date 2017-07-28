@@ -1,31 +1,24 @@
 #include <LoRaShield.h>
-#include <CurieBLE.h>
 #include <Servo.h>
-#include <CurieIMU.h>
+#include<Wire.h>
 
-#define SERVOPIN 4          //servo Motor Pin
-#define Tx 10               //LoRa
-#define Rx 11               //LoRa
-#define PUSH 12             //pushButton Pin
-#define OPEN 60          //angle of door open
-#define CLOSE 0          //angle of door close
-#define PIEZO A1         //piezo vibration sensor Pin
+#define SERVOPIN 9       //servo Motor Pin
+#define Tx 10            //LoRa
+#define Rx 11            //LoRa
+#define PUSH 7           //pushButton Pin
+#define OPEN 82          //angle of door open
+#define CLOSE 180        //angle of door close
+#define PIEZO A1         //Connect the sensor to A1
 
-//BLE 서비스 설정을 위한 선언구간
-BLEService service = BLEService("FEAA"); //UUID -> 0xFEAA로 뜸.
-BLECharacteristic characteristic( "FEAA", BLEBroadcast, 50 );
-//uint8 설정이 많은 이유-> HEX값으로 URL지정함.
-const uint8_t FRAME_TYPE_EDDYSTONE_UID = 0x00;
-const uint8_t FRAME_TYPE_EDDYSTONE_URL = 0x10;
-const uint8_t FRAME_TYPE_EDDYSTONE_TLM = 0x20;
-const uint8_t FRAME_TYPE_EDDYSTONE_EID = 0x40;
-const uint8_t URL_PREFIX_HTTP_WWW_DOT = 0x00;
-const uint8_t URL_PREFIX_HTTPS_WWW_DOT = 0x01;
-const uint8_t URL_PREFIX_HTTP_COLON_SLASH_SLASH = 0x02;
-const uint8_t URL_PREFIX_HTTPS_COLON_SLASH_SLASH = 0x03;
-const uint8_t URL_EXPANSION_COM = 0x07;
+#define MAX_ACCEL_CNT 100
+#define DELAY_ACCEL_FUNC 4000
+#define ACCEL_THRESHOLD 10
+#define MAX_FORCE 1750
+#define MIN_FORCE 1600
 
-const int8_t TX_POWER_DBM = -29; // (-70 + 41);Tx 송출시 기기와 측정장비 사이의 거리가 0m일 때 -29dBm
+#define MAX_PIEZO_COUNT 3
+#define PIEZO_THRESHOLD 700
+#define RESET_PIEZO_THRESHOLD 20
 
 //로라 쉴드, 서보모터,초음파센서 선언부
 LoRaShield LoRa(Tx, Rx);
@@ -34,81 +27,59 @@ Servo servo;
 boolean push_cnt = false;  //서보모터가 돌아가 있는지 여부
 boolean asButton = false; //버튼을 통해 문이 열렸는지 확인하는 변수
 
-int accelFuncCnt = 0;
-float ax, ay, az;   //scaled accelerometer values
+const int MPU=0x68;  //MPU 6050 의 I2C 기본 주소
 const float gravity_earth = 9.80665f;
-float gForce;
-float preVal;
+float AcX,AcY,AcZ, gForce;
+int16_t Tmp,GyX,GyY,GyZ, gForce_int, preVal;
+int accelFuncCnt = 0;
 int diffCount = 0;
 int movingCount = 0;
 int cnt_initial = 0;
 boolean isMoving = false;
+
+//진동감지
+int val_piezo;
+int pre_piezo;
+int piezo_count=0;
+int normal_count=0;
+boolean piezo_active = true;
 
 void setup() 
 {
   //로라 설정
   LoRa.begin(38400);
   Serial.begin(115200); //보드레이트 이격
-  // enable if you want to log values to Serial Monitor
 
-
-
-  //BLE 설정, 실행
-  // begin initialization
-  BLE.begin();
-
-  // No not set local name 
-  //만약 local name을 지정해주면 비콘이 탐지 되지 않음, 설정이 부족해서 안 뜨는 것 같기도 함.
-  //BLE.setLocalName("LOLO-LOCK");
-
-  // set service
-  BLE.setAdvertisedService(service);
-  
-  // add the characteristic to the service
-  service.addCharacteristic( characteristic );
-
-  // add service
-  BLE.addService( service );
-
-  // call broadcast otherwise Service Data is not included in advertisement value
-  characteristic.broadcast();
-
-  // characteristic.writeValue *after* calling characteristic.broadcast
-  uint8_t advdatacopy[] =
-  {   
-    FRAME_TYPE_EDDYSTONE_URL,
-    (uint8_t) TX_POWER_DBM, // Tx Power. Cast to uint8_t or you get a "warning: narrowing conversion"
-    // I suppose it's doing 2s Complement conversion to convert from a negative integer to a hex value.  
-    URL_PREFIX_HTTP_WWW_DOT, // http://www.
-    0x67,0x6f,0x6f,0x67,0x6c,0x65, // google //여기 고치면 URL 바꾸기 가능. 각각의 알파벳마다 ASCII HEX값 지정만 알아내서 넣으면 가능.
-    URL_EXPANSION_COM // .com
-  };
-  characteristic.writeValue( advdatacopy, sizeof(advdatacopy) );
-
-  // start advertising
-  BLE.advertise();  
-
-  //서보
   pinMode(PUSH, INPUT);
   pinMode(Rx, OUTPUT);
+  
+  //서보  
   servo.attach(SERVOPIN);
   servo.write(CLOSE);
 
-  CurieIMU.begin();
-  CurieIMU.setAccelerometerRange(2);  
+  //가속도 센서
+  Wire.begin();      //Wire 라이브러리 초기화
+  Wire.beginTransmission(MPU); //MPU로 데이터 전송 시작
+  Wire.write(0x6B);  // PWR_MGMT_1 register
+  Wire.write(0);     //MPU-6050 시작 모드로
+  Wire.endTransmission(true); 
+
+  Serial.println("Run Success");
 }
  
 void loop() 
 {  
-  //푸시버튼, 문 열림상태 감지 함수.
-  pushButton();
-  if(accelFuncCnt == 5000){
+  pushButton();   //푸시버튼, 문 열림상태 감지 함수.
+    
+  if(accelFuncCnt == DELAY_ACCEL_FUNC && push_cnt == false){
+    if(piezo_active)
+      checkPiezo();
     doorCheckByAccel();
     accelFuncCnt = 0;
   }else{
     accelFuncCnt++;
   }
-  
+ 
   //로라 실행구간.
    while (LoRa.available())
    {
@@ -119,95 +90,130 @@ void loop()
     m = LoRa.GetMessage();
     if(m != ""){
       Serial.println("Recv from LoRa : " + m);
-      if(m == "26")
+      if(m == "26"){
         openDoorByLoRa();
+      }
      }
    }
 }
 
 
-void pushButton()
-{
+void pushButton(){
   int i = digitalRead(PUSH);  // 12번 디지털 입력으로 전압을 읽어들임
 
-  if(!i)                // i 상태 == 1
-  {     
-    servo.write(OPEN);  //모터 60도 회전
+  if(i==0 && push_cnt==false){     
+    servo.write(OPEN);  //모터 90도 회전
     asButton = true;
     push_cnt = true;
   }
-  else 
-  {
-    servo.write(CLOSE);
-    if(push_cnt)
-    {     
-      Serial.println("Button Clicked");
-      LoRa.SendMessage("Button Clicked", HEX);
-      push_cnt = false;
-    }
+  else if(i==1 && push_cnt==true){
+    delay(100);     
+    servo.write(CLOSE);      
+    Serial.println("button pushed");
+    push_cnt = false;
+    piezo_count=0;
   }
 }
 
-boolean openDoorByLoRa(void)
-{
-  //if(Closed){
+void openDoorByLoRa(){
   servo.write(OPEN);
   delay(100);  
   servo.write(CLOSE);
   Serial.println("Open Success");
-  LoRa.SendMessage("Open Success",HEX);
-  return true;
-
-  //}
-  //if(Opened){
-  //Serial.println("Open Fail");
-  //LoRa.SendMessage("Open Fail",HEX);
-  // return false;}
 }
 
-void doorCheckByAccel(void){
-    // read accelerometer measurements from device, scaled to the configured range
-  CurieIMU.readAccelerometerScaled(ax, ay, az);
+void doorCheckByAccel(){
+  Wire.beginTransmission(MPU);    //데이터 전송시작
+  Wire.write(0x3B);               // register 0x3B (ACCEL_XOUT_H), 큐에 데이터 기록
+  Wire.endTransmission(false);    //연결유지
+  Wire.requestFrom(MPU,14,true);  //MPU에 데이터 요청
+  //데이터 한 바이트 씩 읽어서 반환
+  AcX=Wire.read()<<8|Wire.read();  // 0x3B (ACCEL_XOUT_H) & 0x3C (ACCEL_XOUT_L)    
+  AcY=Wire.read()<<8|Wire.read();  // 0x3D (ACCEL_YOUT_H) & 0x3E (ACCEL_YOUT_L)
+  AcZ=Wire.read()<<8|Wire.read();  // 0x3F (ACCEL_ZOUT_H) & 0x40 (ACCEL_ZOUT_L)
+  Tmp=Wire.read()<<8|Wire.read();  // 0x41 (TEMP_OUT_H) & 0x42 (TEMP_OUT_L)
+  GyX=Wire.read()<<8|Wire.read();  // 0x43 (GYRO_XOUT_H) & 0x44 (GYRO_XOUT_L)
+  GyY=Wire.read()<<8|Wire.read();  // 0x45 (GYRO_YOUT_H) & 0x46 (GYRO_YOUT_L)
+  GyZ=Wire.read()<<8|Wire.read();  // 0x47 (GYRO_ZOUT_H) & 0x48 (GYRO_ZOUT_L)
 
-  // display tab-separated accelerometer x/y/z values
-  ax = ax / gravity_earth;
-  ay = ay / gravity_earth;
-  az = az / gravity_earth;
-  gForce = ax*ax + ay*ay+ az*az;
-  gForce = sqrt(gForce) * 10;
-  
-  if(String(gForce) != String(preVal)){
+  AcX = AcX / gravity_earth;
+  AcY = AcY / gravity_earth;
+  AcZ = AcZ / gravity_earth;
+  gForce = AcX* AcX + AcY* AcY + AcZ* AcZ;
+  gForce = sqrt(gForce);
+  gForce_int = (int16_t)gForce;
+  /*
+  if(gForce_int != preVal){
     diffCount++;
   }else{
-    diffCount = 0;
+    diffCount=0;
+    piezo_active = true;
   }
-  preVal = gForce;
+  preVal = gForce_int;
+
+  if(diffCount > (ACCEL_THRESHOLD/2) && !isMoving){
+    piezo_active = false;
+  }
   
-  if(diffCount > 10 && !isMoving){
+  if(diffCount > ACCEL_THRESHOLD && !isMoving){
+  */
+  if((gForce_int > MAX_FORCE || gForce_int < MIN_FORCE) && gForce != 0 && isMoving == false){
+    piezo_active = false;
     movingCount++;
     isMoving = true;
-    Serial.println("Door State: Open");
     if(asButton){
       Serial.println("Door is open inside");
-      LoRa.SendMessage("Door is open inside",HEX);
+      LoRa.SendMessage("0",HEX);
     }else{
-      Serial.println("Door is open outside");
-      LoRa.SendMessage("Door is open outside",HEX);
+      Serial.println("Door is opened outside");
+      LoRa.SendMessage("1",HEX);
     }
     asButton = false;
   }else if(isMoving){
     cnt_initial++;
   }
 
-  if(cnt_initial == 100){
+  if(cnt_initial == MAX_ACCEL_CNT){
     cnt_initial = 0;
     isMoving = false;
     diffCount = 0;
+    piezo_active = true;
+    normal_count=0;
+    piezo_count=0;
   }
   Serial.print("gForce: ");
-  Serial.print(gForce);
+  Serial.print(gForce_int);
   Serial.print("          movingCount: ");
   Serial.print(movingCount);
   Serial.print("          cnt_initial: ");
   Serial.println(cnt_initial);
 }
+
+void checkPiezo(){    //진동감지가 RESET_PIEZO_THRESHOLD(50) 사이로 연달아 PIEZO_THRESHOLD(3)개가 나타나면 서버에 알린다.
+  val_piezo = analogRead(PIEZO);
+  if(val_piezo > PIEZO_THRESHOLD){
+    piezo_count++;
+    normal_count=0;
+  }else if(pre_piezo <= PIEZO_THRESHOLD){
+    normal_count++; 
+  }
+  pre_piezo = val_piezo;
+
+  if(normal_count == RESET_PIEZO_THRESHOLD){
+    normal_count=0;
+    piezo_count=0;
+  }
+  
+  if(piezo_count == MAX_PIEZO_COUNT){ //PIEZO_THRESHOLD 5
+    Serial.println("Ring Ring");
+    LoRa.SendMessage("2",HEX);
+    piezo_count++;
+  }
+  Serial.print("val_piezo: ");
+  Serial.print(val_piezo);
+  Serial.print("   piezo_count: ");
+  Serial.print(piezo_count);
+  Serial.print("   normal_count: ");
+  Serial.println(normal_count);
+}
+
