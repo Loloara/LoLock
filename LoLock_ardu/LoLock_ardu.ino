@@ -6,75 +6,61 @@
 #define Tx 10            //LoRa
 #define Rx 11            //LoRa
 #define PUSH 7           //pushButton Pin
-#define OPEN 82          //angle of door open
+#define OPEN 80          //angle of door open
 #define CLOSE 180        //angle of door close
-#define PIEZO A1         //Connect the sensor to A1
 
-#define MAX_ACCEL_CNT 100
+#define MAX_ACCEL_CNT 100 //when the moving is detected, stop function for a while
 #define DELAY_ACCEL_FUNC 4000
-#define ACCEL_THRESHOLD 10
-#define MAX_FORCE 1750
-#define MIN_FORCE 1600
+#define MAX_FORCE 1750    //max force value of normal range
+#define MIN_FORCE 1600    //min force value of normal range
 
-#define MAX_PIEZO_COUNT 3
-#define PIEZO_THRESHOLD 700
-#define RESET_PIEZO_THRESHOLD 20
-
-//로라 쉴드, 서보모터,초음파센서 선언부
-LoRaShield LoRa(Tx, Rx);
-String s,m;
+LoRaShield LoRa(Tx, Rx);//Rx, Tx (define inverse pin)
+String s,m;     //String for LoRa.ReadLine(), LoRa.GetMessage()
 Servo servo;
-boolean push_cnt = false;  //서보모터가 돌아가 있는지 여부
-boolean asButton = false; //버튼을 통해 문이 열렸는지 확인하는 변수
+boolean push_cnt = false;  //is pushing?
+boolean asButton = false; //was the button pressed before the door opened?
 
-const int MPU=0x68;  //MPU 6050 의 I2C 기본 주소
+const int MPU=0x68;  //I2C base address of MPU 6050
 const float gravity_earth = 9.80665f;
 float AcX,AcY,AcZ, gForce;
 int16_t Tmp,GyX,GyY,GyZ, gForce_int, preVal;
 int accelFuncCnt = 0;
-int diffCount = 0;
+
 int movingCount = 0;
 int cnt_initial = 0;
 boolean isMoving = false;
-
-//진동감지
-int val_piezo;
-int pre_piezo;
+int moving_interval_x = 0;
+int moving_interval_y = 0;
 int piezo_count=0;
-int normal_count=0;
-boolean piezo_active = true;
 
 void setup() 
 {
-  //로라 설정
-  LoRa.begin(38400);
-  Serial.begin(115200); //보드레이트 이격
+  LoRa.begin(38400);    //set LoRa
+  Serial.begin(115200); //board rate
 
-  pinMode(PUSH, INPUT);
-  pinMode(Rx, OUTPUT);
+  pinMode(PUSH, INPUT); //set button
+  pinMode(Rx, OUTPUT);  //set LoRa output
   
   //서보  
-  servo.attach(SERVOPIN);
-  servo.write(CLOSE);
+  servo.attach(SERVOPIN);  //set servo
+  servo.write(CLOSE);   //init servo
 
   //가속도 센서
-  Wire.begin();      //Wire 라이브러리 초기화
-  Wire.beginTransmission(MPU); //MPU로 데이터 전송 시작
+  Wire.begin();      //init Wire library
+  Wire.beginTransmission(MPU); //start transmit data to MPU
   Wire.write(0x6B);  // PWR_MGMT_1 register
-  Wire.write(0);     //MPU-6050 시작 모드로
+  Wire.write(0);     //mode to MPU-6050
   Wire.endTransmission(true); 
 
-  Serial.println("Run Success");
+  Serial.println("setup complete");
 }
  
 void loop() 
 {  
-  pushButton();   //푸시버튼, 문 열림상태 감지 함수.
+  pushButton();   //detect the button is pressing
     
-  if(accelFuncCnt == DELAY_ACCEL_FUNC && push_cnt == false){
-    if(piezo_active)
-      checkPiezo();
-    doorCheckByAccel();
+  if(accelFuncCnt == DELAY_ACCEL_FUNC && push_cnt == false){    //delay 4000 cnt && no button pressed
+    doorCheckByAccel();   //check door state[opened inside(0), opened outside(1), kicked(2)]
     accelFuncCnt = 0;
   }else{
     accelFuncCnt++;
@@ -91,7 +77,7 @@ void loop()
     if(m != ""){
       Serial.println("Recv from LoRa : " + m);
       if(m == "26"){
-        openDoorByLoRa();
+        openDoorByLoRa(); //activate servo for opening the door by LoRa
       }
      }
    }
@@ -99,11 +85,11 @@ void loop()
 
 
 void pushButton(){
-  int i = digitalRead(PUSH);  // 12번 디지털 입력으로 전압을 읽어들임
+  int i = digitalRead(PUSH);  // read digital pin
 
   if(i==0 && push_cnt==false){     
-    servo.write(OPEN);  //모터 90도 회전
-    asButton = true;
+    servo.write(OPEN);
+    asButton = true;      //true <- opened inside, false <- opened outside
     push_cnt = true;
   }
   else if(i==1 && push_cnt==true){
@@ -117,17 +103,18 @@ void pushButton(){
 
 void openDoorByLoRa(){
   servo.write(OPEN);
-  delay(100);  
+  delay(300);  
   servo.write(CLOSE);
   Serial.println("Open Success");
 }
 
 void doorCheckByAccel(){
-  Wire.beginTransmission(MPU);    //데이터 전송시작
-  Wire.write(0x3B);               // register 0x3B (ACCEL_XOUT_H), 큐에 데이터 기록
-  Wire.endTransmission(false);    //연결유지
-  Wire.requestFrom(MPU,14,true);  //MPU에 데이터 요청
-  //데이터 한 바이트 씩 읽어서 반환
+  Wire.beginTransmission(MPU);    //start transmit data
+  Wire.write(0x3B);               //register 0x3B (ACCEL_XOUT_H), record data to queue
+  Wire.endTransmission(false);    //keep connecting
+  Wire.requestFrom(MPU,14,true);  //request data to MPU
+  
+  //read eight bytes of data one byte at a time
   AcX=Wire.read()<<8|Wire.read();  // 0x3B (ACCEL_XOUT_H) & 0x3C (ACCEL_XOUT_L)    
   AcY=Wire.read()<<8|Wire.read();  // 0x3D (ACCEL_YOUT_H) & 0x3E (ACCEL_YOUT_L)
   AcZ=Wire.read()<<8|Wire.read();  // 0x3F (ACCEL_ZOUT_H) & 0x40 (ACCEL_ZOUT_L)
@@ -142,78 +129,82 @@ void doorCheckByAccel(){
   gForce = AcX* AcX + AcY* AcY + AcZ* AcZ;
   gForce = sqrt(gForce);
   gForce_int = (int16_t)gForce;
-  /*
-  if(gForce_int != preVal){
-    diffCount++;
-  }else{
-    diffCount=0;
-    piezo_active = true;
-  }
-  preVal = gForce_int;
 
-  if(diffCount > (ACCEL_THRESHOLD/2) && !isMoving){
-    piezo_active = false;
-  }
-  
-  if(diffCount > ACCEL_THRESHOLD && !isMoving){
-  */
-  if((gForce_int > MAX_FORCE || gForce_int < MIN_FORCE) && gForce != 0 && isMoving == false){
-    piezo_active = false;
-    movingCount++;
-    isMoving = true;
-    if(asButton){
-      Serial.println("Door is open inside");
-      LoRa.SendMessage("0",HEX);
-    }else{
-      Serial.println("Door is opened outside");
-      LoRa.SendMessage("1",HEX);
+  if(isMoving){         //detected door moving
+    cnt_initial++;      //stop calculating movingCount for a while
+    if(cnt_initial % 10 == 0 && cnt_initial != 100 || cnt_initial == 1){  //print log for waiting
+      Serial.print(MAX_ACCEL_CNT/10 - cnt_initial/10);
+      Serial.println(" sec to Ready");
     }
-    asButton = false;
-  }else if(isMoving){
+  }else if((gForce_int > MAX_FORCE || gForce_int < MIN_FORCE) && gForce != 0){    //Over Threshold
+    movingCount++;
+    if(movingCount==3){
+      if(moving_interval_x + moving_interval_y < 2){  //short interval vibes
+        piezo_count++;
+        if(piezo_count == 3){
+          Serial.println("Kick the door");
+          LoRa.SendMessage("2",HEX);
+          
+          isMoving=true;          
+          movingCount=0;
+          asButton=false;
+          piezo_count=0;          
+          moving_interval_x=0;
+          moving_interval_y=0;
+          cnt_initial=0;
+        }
+      }else{                                      //long interval vibes
+        if(asButton){
+          Serial.println("Door is open inside");
+          LoRa.SendMessage("0",HEX);
+        }else{
+          Serial.println("Door is opened outside");
+          LoRa.SendMessage("1",HEX);
+        }
+        
+        isMoving = true;        
+        movingCount = 0;
+        asButton = false;
+        piezo_count=0;
+        moving_interval_x=0;
+        moving_interval_y=0;
+        cnt_initial=0;
+      }
+    }
+  }else if(movingCount>0){    //gForce_int is out of threshold range and movingCount is 1 or 2
+    if(movingCount==1)
+      moving_interval_x++;
+    else if(movingCount==2)
+      moving_interval_y++;
+      
+    if(moving_interval_x == 10 || moving_interval_y == 10){ //over interval
+      moving_interval_x=0;
+      moving_interval_y=0;
+      piezo_count=0;
+      movingCount=0;
+    }
+  }else if(movingCount==0){   //init moving interval and piezo count
     cnt_initial++;
+    moving_interval_x=0;
+    moving_interval_y=0;
+    if(cnt_initial==5){
+      cnt_initial=0;
+      piezo_count=0;
+    }
   }
 
-  if(cnt_initial == MAX_ACCEL_CNT){
+  if(cnt_initial == MAX_ACCEL_CNT){ //when the moving is detected, stop function for a while
     cnt_initial = 0;
     isMoving = false;
-    diffCount = 0;
-    piezo_active = true;
-    normal_count=0;
-    piezo_count=0;
+    Serial.println("Ready for accelometer detection");
   }
-  Serial.print("gForce: ");
-  Serial.print(gForce_int);
-  Serial.print("          movingCount: ");
-  Serial.print(movingCount);
-  Serial.print("          cnt_initial: ");
-  Serial.println(cnt_initial);
-}
-
-void checkPiezo(){    //진동감지가 RESET_PIEZO_THRESHOLD(50) 사이로 연달아 PIEZO_THRESHOLD(3)개가 나타나면 서버에 알린다.
-  val_piezo = analogRead(PIEZO);
-  if(val_piezo > PIEZO_THRESHOLD){
-    piezo_count++;
-    normal_count=0;
-  }else if(pre_piezo <= PIEZO_THRESHOLD){
-    normal_count++; 
-  }
-  pre_piezo = val_piezo;
-
-  if(normal_count == RESET_PIEZO_THRESHOLD){
-    normal_count=0;
-    piezo_count=0;
-  }
-  
-  if(piezo_count == MAX_PIEZO_COUNT){ //PIEZO_THRESHOLD 5
-    Serial.println("Ring Ring");
-    LoRa.SendMessage("2",HEX);
-    piezo_count++;
-  }
-  Serial.print("val_piezo: ");
-  Serial.print(val_piezo);
-  Serial.print("   piezo_count: ");
-  Serial.print(piezo_count);
-  Serial.print("   normal_count: ");
-  Serial.println(normal_count);
+//  Serial.print("gForce: ");
+//  Serial.print(gForce_int);
+//  Serial.print("  movingCount: ");
+//  Serial.print(movingCount);
+//  Serial.print("  piezo_count: ");
+//  Serial.print(piezo_count);
+//  Serial.print("  cnt_initial: ");
+//  Serial.println(cnt_initial);
 }
 
